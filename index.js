@@ -1,26 +1,34 @@
 const SEND_SMS = false
 
-require('dotenv').config();
+require('dotenv').config()
 const fetch = require('node-fetch')
 const cheerio = require('cheerio')
 const fs = require('fs')
+var CronJob = require('cron').CronJob
 const writeStream = fs.createWriteStream('wohnungen.csv')
 
 // Twilio settings
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const numberSentFrom = process.env.TWILIO_NUMBER;
-const numberToSendTo = process.env.NUMBER_TO_SEND_TO;
+const accountSid = process.env.TWILIO_ACCOUNT_SID
+const authToken = process.env.TWILIO_AUTH_TOKEN
+const numberSentFrom = process.env.TWILIO_NUMBER
+const numberToSendTo = process.env.NUMBER_TO_SEND_TO
 
-var twilio = require('twilio');
-var client = new twilio(accountSid, authToken);
+var twilio = require('twilio')
+var client = new twilio(accountSid, authToken)
 
 // CSV headers
 writeStream.write(`Überschrift, Link, Beschreibung, Größe, Zimmer, Preis, Datum \n`)
 
-const kleinanzeigenQueryLink = "";
+var job = new CronJob('*/10 * * * *', function() {
+  console.log('Suche nach neuen Wohnungen..')
+  fetchApartments()
+}, null, true, 'Europe/Berlin')
+job.start()
 
-fetch(kleinanzeigenQueryLink)
+const kleinanzeigenQueryLink = process.env.KLEINANZEIGEN_LINK
+
+const fetchApartments = () => {
+    fetch(kleinanzeigenQueryLink)
     .then((res) => res.text())
     .then((body) => {
         const $ = cheerio.load(body)
@@ -38,13 +46,13 @@ fetch(kleinanzeigenQueryLink)
 
             if(uploadDate.toLowerCase().includes('heute')) {
                 console.log(
-                    'title = '+title+ '\n' +
-                    'link = '+link+  '\n' +
-                    'description = '+description+ '\n' +
-                    'size = '+size+  '\n' +
-                    'rooms = '+rooms+ '\n' +
-                    'price = '+price+ '\n' +
-                    'uploadDate = '+uploadDate
+                    'Überschrift: '+title+ '\n' +
+                    'Link: '+link+  '\n' +
+                    'Beschreibung: '+description+ '\n' +
+                    'Größe: '+size+  '\n' +
+                    'Zimmer: '+rooms+ '\n' +
+                    'Preis: '+price+ '\n' +
+                    'Datum: '+uploadDate
                  )
                 console.log('________________________')
                 
@@ -65,12 +73,13 @@ fetch(kleinanzeigenQueryLink)
                 }
             }
         })
-    });
+    })
+}
 
 const sendMessage = (message) => {
     client.messages.create({
         body: message,
         to: numberToSendTo,  // Text this number
         from: numberSentFrom // From a valid Twilio number
-    }).then((message) => console.log(message.sid));
+    }).then((message) => console.log(message.sid))
 }
