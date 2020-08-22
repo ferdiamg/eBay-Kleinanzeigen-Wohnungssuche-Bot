@@ -1,0 +1,24 @@
+{
+  "name": "nodewebscraper",
+  "version": "1.0.0",
+  "description": "Scrapes eBay Kleinanzeigen for good listings",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "nodejs",
+    "cheerio",
+    "webscraping",
+    "kleinanzeigen",
+    "ebay"
+  ],
+  "author": "Ferdi Armagan",
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.3",
+    "dotenv": "^8.2.0",
+    "node-fetch": "^2.6.0",
+    "twilio": "^3.49.0"
+  }
+}
