@@ -3,6 +3,7 @@
 
 # Scraper related
 wohnungen.csv
+client_secret.json
 
 # Logs
 logs

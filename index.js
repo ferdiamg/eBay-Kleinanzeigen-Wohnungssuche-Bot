@@ -1,25 +1,46 @@
 const SEND_SMS = false
 
+const Apartment = require('./apartment')
 require('dotenv').config()
 const fetch = require('node-fetch')
 const cheerio = require('cheerio')
 const fs = require('fs')
+const csv = require('csv-parser');
 var CronJob = require('cron').CronJob
-const writeStream = fs.createWriteStream('wohnungen.csv')
 
 // Twilio settings
 const accountSid = process.env.TWILIO_ACCOUNT_SID
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const numberSentFrom = process.env.TWILIO_NUMBER
 const numberToSendTo = process.env.NUMBER_TO_SEND_TO
-
 var twilio = require('twilio')
 var client = new twilio(accountSid, authToken)
 
-// CSV headers
-writeStream.write(`Überschrift, Link, Beschreibung, Größe, Zimmer, Preis, Datum \n`)
+let apartments = [];
+const filePath = './wohnungen.csv';
+fs.access(filePath, fs.F_OK, (err) => {
+    if(err) {
+        console.log(err)
+        // CSV headers
+        writeStream = fs.createWriteStream('wohnungen.csv')
+        writeStream.write(`Überschrift,Link,Beschreibung,Größe,Zimmer,Preis,Datum\n`)
+        return
+    }
 
-var job = new CronJob('*/10 * * * *', function() {
+    fs.createReadStream(filePath)
+        .pipe(csv())
+        .on('error', () => {
+            console.log("Fehler beim Einlesen der wohnungen.csv")
+        })
+        .on('data', (row) => {
+            let apartment = new Apartment(row.Überschrift, row.Link, row.Beschreibung, row.Größe, row.Zimmer, row.Preis, row.Datum)
+            apartments.push(apartment)
+        })
+        .on('end', () => {
+        })
+})
+
+var job = new CronJob('*/5 * * * * *', function() {
   console.log('Suche nach neuen Wohnungen..')
   fetchApartments()
 }, null, true, 'Europe/Berlin')
@@ -44,7 +65,8 @@ const fetchApartments = () => {
             if(size.includes(',')) size = size.substring(0, size.indexOf(','))
             if(size.includes(' ')) size = size.substring(0, size.indexOf(' '))
 
-            if(uploadDate.toLowerCase().includes('heute')) {
+            // TODO: checken ob link schon im apartments array ist, dann nicht appenden und keine SMS senden
+            if(uploadDate.toLowerCase().includes('gestern')) {
                 console.log(
                     'Überschrift: '+title+ '\n' +
                     'Link: '+link+  '\n' +
@@ -57,7 +79,11 @@ const fetchApartments = () => {
                 console.log('________________________')
                 
                 // Write row to CSV
-                writeStream.write(`${title}, ${link}, ${description}, ${size+'m²'}, ${rooms}, ${price}, ${uploadDate} \n`)
+                writeStream = fs.createWriteStream('wohnungen.csv', {flags: 'a'})
+                writeStream.write(`${title},${link},${description},${size+'m²'},${rooms},${price},${uploadDate}\n`)
+
+                let apartment = new Apartment(title, link, description, size, rooms, price, uploadDate)
+                apartments.push(apartment)
 
                 // Send SMS
                 if(SEND_SMS) {
