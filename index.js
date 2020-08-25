@@ -3,6 +3,7 @@ const fetch = require('node-fetch')
 const cheerio = require('cheerio')
 var CronJob = require('cron').CronJob
 const { GoogleSpreadsheet } = require('google-spreadsheet')
+const Apartment = require('./models/apartment')
 
 // Google Sheets settings
 const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEETS_SPREADSHEET_ID)
@@ -19,7 +20,7 @@ accessSpreadsheet()
 
 // App settings
 const kleinanzeigenQueryLink = process.env.KLEINANZEIGEN_LINK
-const SEND_SMS = false
+const SEND_SMS = true
 
 // Twilio settings
 const accountSid = process.env.TWILIO_ACCOUNT_SID
@@ -29,65 +30,64 @@ const numberToSendTo = process.env.NUMBER_TO_SEND_TO
 var twilio = require('twilio')
 var client = new twilio(accountSid, authToken)
 
-var job = new CronJob('*/5 * * * * *', function () {
+var job = new CronJob('*/10 * * * *', function () {
     console.log('Suche nach neuen Wohnungen..')
     fetchApartments()
 }, null, true, 'Europe/Berlin')
 job.start()
 
 async function fetchApartments() {
-    fetch(kleinanzeigenQueryLink)
-        .then((res) => res.text())
-        .then((body) => {
-            const $ = cheerio.load(body)
+    let fetchResult = await fetch(kleinanzeigenQueryLink)
+    let fetchResultHTML = await fetchResult.text()
+    const $ = cheerio.load(fetchResultHTML)
+    let scrapedApartments = []
 
-            $('.ad-listitem').each((i, el) => {
-                const title = $(el).find('.text-module-begin').text().replace(/\s\s+/g, '').replace(/\,/g, ' ')
-                const link = 'https://www.ebay-kleinanzeigen.de/' + $(el).find('.text-module-begin').find('a').attr('href')
-                const description = $(el).find('.text-module-begin').next().text().replace(/\r?\n|\r/g, '').replace(/\,/g, ' ')
-                const rooms = $(el).find('.text-module-begin').next().next().children().last().text().replace(/\s\s+/g, '')
-                const price = $(el).find('.aditem-details').children().first().text().replace(/\s\s+/g, '')
-                const uploadDate = $(el).find('.aditem-details').next().text().replace(/\r?\n|\r/g, '').replace(/\s\s+/g, '').replace(/\,/, '')
-                var size = $(el).find('.text-module-begin').next().next().children().first().text().replace(/\s\s+/g, '')
-                if (size.includes(',')) size = size.substring(0, size.indexOf(','))
-                if (size.includes(' ')) size = size.substring(0, size.indexOf(' '))
+    $('.ad-listitem').each((i, el) => {
+        const title = $(el).find('.text-module-begin').text().replace(/\s\s+/g, '').replace(/\,/g, ' ')
+        const link = 'https://www.ebay-kleinanzeigen.de/' + $(el).find('.text-module-begin').find('a').attr('href')
+        const description = $(el).find('.text-module-begin').next().text().replace(/\r?\n|\r/g, '').replace(/\,/g, ' ')
+        const rooms = $(el).find('.text-module-begin').next().next().children().last().text().replace(/\s\s+/g, '')
+        const price = $(el).find('.aditem-details').children().first().text().replace(/\s\s+/g, '')
+        const uploadDate = $(el).find('.aditem-details').next().text().replace(/\r?\n|\r/g, '').replace(/\s\s+/g, '').replace(/\,/, '')
+        var size = $(el).find('.text-module-begin').next().next().children().first().text().replace(/\s\s+/g, '')
+        if (size.includes(',')) size = size.substring(0, size.indexOf(','))
+        if (size.includes(' ')) size = size.substring(0, size.indexOf(' '))
+        scrapedApartments.push(new Apartment(title, link, description, size, rooms, price, uploadDate))
+    })
 
-                // TODO: checken ob link schon im apartments array ist, dann nicht appenden und keine SMS senden
-                if (uploadDate.toLowerCase().includes('heute')) {
-                    sheet.getRows({ query: `link = ${link}` }).then(res => {
-                        if (Object.keys(res).length === 0) {
-                            console.log(
-                                'Überschrift: ' + title + '\n' +
-                                'Link: ' + link + '\n' +
-                                'Beschreibung: ' + description + '\n' +
-                                'Größe: ' + size + '\n' +
-                                'Zimmer: ' + rooms + '\n' +
-                                'Preis: ' + price + '\n' +
-                                'Datum: ' + uploadDate
-                            )
-                            console.log('________________________')
+    const filteredApartments = scrapedApartments.filter(apartment => apartment.uploadDate.toLowerCase().includes('heute'))
+    for (const scrapedApartment of filteredApartments) {
+        let apartmentAlreadyInTable = false
+        let rows = await sheet.getRows()
+        for(row in rows) {
+            if(scrapedApartment.link === rows[row].Link) apartmentAlreadyInTable = true
+        }
 
-                            addRow(title, link, description, size, rooms, price, uploadDate)
+        if (!apartmentAlreadyInTable) {
+            console.log(scrapedApartment)
 
-                            // Send SMS
-                            if (SEND_SMS) {
-                                sendMessage(
-                                    title + '\n' +
-                                    link + '\n' +
-                                    description + '\n' +
-                                    size + 'm²' + '\n' +
-                                    rooms + '\n' +
-                                    price + '\n' +
-                                    uploadDate
-                                )
-                            }
-                        }
-                    }, err => {
-                        console.log(err)
-                    })
-                }
-            })
-        })
+            await addRow(
+                scrapedApartment.title,
+                scrapedApartment.link,
+                scrapedApartment.description,
+                scrapedApartment.size,
+                scrapedApartment.rooms,
+                scrapedApartment.price,
+                scrapedApartment.uploadDate
+            )
+
+            // Send SMS
+            if (SEND_SMS) sendMessage(
+                scrapedApartment.title + '\n' +
+                scrapedApartment.link + '\n' +
+                scrapedApartment.description + '\n' +
+                scrapedApartment.size + '\n' +
+                scrapedApartment.rooms + '\n' +
+                scrapedApartment.price + '\n' +
+                scrapedApartment.uploadDate
+            )
+        }
+    }
 }
 
 function sendMessage(message) {
